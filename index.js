@@ -3,7 +3,8 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
-  DisconnectReason
+  DisconnectReason,
+  Browsers
 } = require('@exclipz/bails');
 const pino = require('pino');
 
@@ -13,33 +14,34 @@ async function startBot() {
 
   const sock = makeWASocket({
     version,
+    browser: Browsers.ubuntu('Chrome'), // helps avoid some connection issues
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
     },
     logger: pino({ level: 'silent' }),
-    printQRInTerminal: false
+    printQRInTerminal: false,
+    connectTimeoutMs: 60_000, // give it time to connect
   });
 
-  // Always save credentials when they update
   sock.ev.on('creds.update', saveCreds);
 
-  // Promise that resolves when the socket reaches a state where we can request a pairing code
-  const waitForValidConnection = () => new Promise((resolve, reject) => {
-    const onUpdate = (update) => {
-      const { connection } = update;
-      if (connection && connection !== 'close') {
-        sock.ev.off('connection.update', onUpdate);  // clean up
-        resolve();
-      } else if (connection === 'close') {
-        sock.ev.off('connection.update', onUpdate);
-        reject(new Error('Connection closed before pairing code could be requested'));
-      }
-    };
-    sock.ev.on('connection.update', onUpdate);
-  });
+  // We'll use a promise that resolves only when connection === 'open'
+  const waitForOpen = () =>
+    new Promise((resolve, reject) => {
+      const handler = ({ connection }) => {
+        if (connection === 'open') {
+          sock.ev.off('connection.update', handler);
+          resolve();
+        } else if (connection === 'close') {
+          sock.ev.off('connection.update', handler);
+          reject(new Error('Connection closed before open'));
+        }
+      };
+      sock.ev.on('connection.update', handler);
+    });
 
-  // Main connection handler (for reconnection / logging)
+  // Permanent connection watcher (for reconnection & logging)
   sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
     if (connection === 'open') {
       console.log('✅ Bot connected successfully!');
@@ -48,24 +50,27 @@ async function startBot() {
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       console.log('Connection closed. Reconnecting:', shouldReconnect);
       if (shouldReconnect) {
-        startBot();  // restart the whole process
+        startBot(); // restart
       } else {
-        console.log('👋 Logged out. Delete the "auth_info" folder to re-pair.');
+        console.log('👋 Logged out. Delete "auth_info" folder and redeploy.');
       }
     }
   });
 
-  // If the bot isn't registered yet, request a pairing code once the socket is ready
+  // If not registered, wait until the socket is OPEN before requesting a pairing code
   if (!sock.authState.creds.registered) {
     try {
-      await waitForValidConnection();  // wait until WebSocket is open enough
+      console.log('Waiting for connection to open...');
+      await waitForOpen();
       const ownerNumber = '447463445574';
+      console.log('Requesting pairing code for', ownerNumber);
       const code = await sock.requestPairingCode(ownerNumber);
       console.log(`\n🔐 Your pairing code: ${code}\n`);
-      console.log('Enter this code in WhatsApp on your phone (Linked Devices > Link with phone number).');
+      console.log('Enter this code on your phone: WhatsApp → Linked Devices → Link with phone number.');
     } catch (err) {
-      console.error('Failed to get pairing code:', err.message);
-      startBot(); // retry
+      console.error('Failed to request pairing code:', err.message);
+      // Retry after a short delay
+      setTimeout(() => startBot(), 5000);
       return;
     }
   }
@@ -73,4 +78,5 @@ async function startBot() {
   return sock;
 }
 
-startBot().catch(err => console.error('❌ Fatal error:', err));
+// Start and ignore any WebSocket-level crash to let reconnection logic handle it
+startBot().catch(err => console.error('❌ Bot crashed:', err));
