@@ -1,7 +1,7 @@
 {
   "name": "bails-bot",
   "version": "1.0.0",
-  "description": "WhatsApp bot using @exclipz/bails with pairing code",
+  "description": "WhatsApp bot using @exclipz/bails with persistent pairing retry",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
