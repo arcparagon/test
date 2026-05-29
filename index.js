@@ -3,18 +3,20 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason
-} = require("@whiskeysockets/baileys")
+} = require("@exclipz/bails")
 
-const pino = require("pino")
 const express = require("express")
+const pino = require("pino")
 
 const app = express()
 
-const PORT = process.env.PORT || 3000
-const BOT_NUMBER = (process.env.BOT_NUMBER || "447463445574").replace(/\+/g, "")
+const PORT = process.env.PORT || 10000
+const BOT_NUMBER = (process.env.BOT_NUMBER || "447463445574")
+  .replace(/\+/g, "")
+  .replace(/\s/g, "")
 
 app.get("/", (req, res) => {
-  res.status(200).send("WhatsApp Bot Online")
+  res.send("Bot Online")
 })
 
 app.get("/health", (req, res) => {
@@ -29,20 +31,26 @@ app.listen(PORT, () => {
 })
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("./session")
+  const { state, saveCreds } =
+    await useMultiFileAuthState("./session")
 
-  const { version } = await fetchLatestBaileysVersion()
+  const { version } =
+    await fetchLatestBaileysVersion()
 
   const sock = makeWASocket({
-    version,
     auth: state,
+    version,
     logger: pino({ level: "silent" }),
-    browser: ["Render Pairing Bot", "Chrome", "1.0.0"]
+    browser: [
+      "Ubuntu",
+      "Chrome",
+      "20.0.04"
+    ]
   })
 
   sock.ev.on("creds.update", saveCreds)
 
-  let pairingPrinted = false
+  let pairingSent = false
 
   sock.ev.on("connection.update", async (update) => {
     const {
@@ -52,57 +60,57 @@ async function startBot() {
 
     console.log("Connection Update:", connection)
 
-    try {
-      if (
-        !sock.authState.creds.registered &&
-        !pairingPrinted
-      ) {
-        pairingPrinted = true
+    if (
+      !sock.authState.creds.registered &&
+      !pairingSent
+    ) {
+      pairingSent = true
 
+      try {
         await new Promise(resolve =>
-          setTimeout(resolve, 8000)
+          setTimeout(resolve, 15000)
         )
 
-        const code = await sock.requestPairingCode(
-          BOT_NUMBER
-        )
+        const code =
+          await sock.requestPairingCode(
+            BOT_NUMBER
+          )
 
         console.log("")
-        console.log("====================================")
+        console.log("================================")
         console.log("PAIRING CODE")
         console.log(code)
-        console.log("====================================")
+        console.log("================================")
         console.log("")
+      } catch (err) {
+        pairingSent = false
+        console.log("Pairing Error:", err)
       }
-    } catch (err) {
-      pairingPrinted = false
-      console.error("Pairing Error:", err)
     }
 
     if (connection === "open") {
-      console.log("WhatsApp Connected Successfully")
+      console.log("WhatsApp Connected")
     }
 
     if (connection === "close") {
       console.log("Connection Closed")
 
       const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !==
+        lastDisconnect?.error?.output
+          ?.statusCode !==
         DisconnectReason.loggedOut
 
       if (shouldReconnect) {
-        console.log("Reconnecting in 5 seconds...")
-
         setTimeout(() => {
           startBot()
         }, 5000)
-      } else {
-        console.log("Logged Out")
       }
     }
   })
 
-  sock.ev.on("messages.upsert", async ({ messages }) => {
+  sock.ev.on("messages.upsert", async ({
+    messages
+  }) => {
     const msg = messages?.[0]
 
     if (!msg?.message) return
@@ -114,35 +122,12 @@ async function startBot() {
       msg.message.extendedTextMessage?.text ||
       ""
 
-    console.log(`[MSG] ${jid}: ${text}`)
-
     if (text === ".ping") {
       await sock.sendMessage(jid, {
         text: "pong 🗿"
       })
     }
-
-    if (text === ".runtime") {
-      await sock.sendMessage(jid, {
-        text: `Runtime: ${Math.floor(
-          process.uptime()
-        )} seconds`
-      })
-    }
-
-    if (text === ".menu") {
-      await sock.sendMessage(jid, {
-        text:
-`MENU
-
-.ping
-.runtime
-.menu`
-      })
-    }
   })
 }
 
-startBot().catch(err => {
-  console.error("Fatal Error:", err)
-})
+startBot().catch(console.error)
