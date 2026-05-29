@@ -1,16 +1,13 @@
 {
-  "name": "wa-pairing-render",
+  "name": "bails-bot",
   "version": "1.0.0",
+  "description": "WhatsApp bot using @exclipz/bails with pairing code",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": "20.x"
-  },
   "dependencies": {
     "@exclipz/bails": "latest",
-    "express": "^5.1.0",
-    "pino": "^9.7.0"
+    "pino": "^8.15.0"
   }
 }
