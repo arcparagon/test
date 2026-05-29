@@ -1,133 +1,56 @@
 const {
-  default: makeWASocket,
+  makeWASocket,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   DisconnectReason
-} = require("@exclipz/bails")
-
-const express = require("express")
-const pino = require("pino")
-
-const app = express()
-
-const PORT = process.env.PORT || 10000
-const BOT_NUMBER = (process.env.BOT_NUMBER || "447463445574")
-  .replace(/\+/g, "")
-  .replace(/\s/g, "")
-
-app.get("/", (req, res) => {
-  res.send("Bot Online")
-})
-
-app.get("/health", (req, res) => {
-  res.json({
-    status: true,
-    uptime: Math.floor(process.uptime())
-  })
-})
-
-app.listen(PORT, () => {
-  console.log(`Web server running on port ${PORT}`)
-})
+} = require('@exclipz/bails');
+const pino = require('pino');
 
 async function startBot() {
-  const { state, saveCreds } =
-    await useMultiFileAuthState("./session")
-
-  const { version } =
-    await fetchLatestBaileysVersion()
+  // Store session in the "auth_info" folder
+  const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+  const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
-    auth: state,
     version,
-    logger: pino({ level: "silent" }),
-    browser: [
-      "Ubuntu",
-      "Chrome",
-      "20.0.04"
-    ]
-  })
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+    },
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: false   // we use pairing code, not QR
+  });
 
-  sock.ev.on("creds.update", saveCreds)
+  // Request an 8‑digit pairing code if not already registered
+  if (!sock.authState.creds.registered) {
+    const ownerNumber = '447463445574'; // your main WhatsApp number
+    const code = await sock.requestPairingCode(ownerNumber);
+    console.log(`\n🔐 Your pairing code: ${code}\n`);
+    console.log('Enter this code in WhatsApp on your phone (Linked Devices > Link with phone number).');
+  }
 
-  let pairingSent = false
+  // Save credentials whenever they are updated
+  sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on("connection.update", async (update) => {
-    const {
-      connection,
-      lastDisconnect
-    } = update
-
-    console.log("Connection Update:", connection)
-
-    if (
-      !sock.authState.creds.registered &&
-      !pairingSent
-    ) {
-      pairingSent = true
-
-      try {
-        await new Promise(resolve =>
-          setTimeout(resolve, 15000)
-        )
-
-        const code =
-          await sock.requestPairingCode(
-            BOT_NUMBER
-          )
-
-        console.log("")
-        console.log("================================")
-        console.log("PAIRING CODE")
-        console.log(code)
-        console.log("================================")
-        console.log("")
-      } catch (err) {
-        pairingSent = false
-        console.log("Pairing Error:", err)
-      }
-    }
-
-    if (connection === "open") {
-      console.log("WhatsApp Connected")
-    }
-
-    if (connection === "close") {
-      console.log("Connection Closed")
-
+  // Connection handling
+  sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
+    if (connection === 'open') {
+      console.log('✅ Bot connected successfully!');
+    } else if (connection === 'close') {
       const shouldReconnect =
-        lastDisconnect?.error?.output
-          ?.statusCode !==
-        DisconnectReason.loggedOut
-
+        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log('Connection closed. Reconnecting:', shouldReconnect);
       if (shouldReconnect) {
-        setTimeout(() => {
-          startBot()
-        }, 5000)
+        startBot();
+      } else {
+        console.log('👋 Logged out. Delete the "auth_info" folder to re-pair.');
       }
     }
-  })
+  });
 
-  sock.ev.on("messages.upsert", async ({
-    messages
-  }) => {
-    const msg = messages?.[0]
-
-    if (!msg?.message) return
-
-    const jid = msg.key.remoteJid
-
-    const text =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      ""
-
-    if (text === ".ping") {
-      await sock.sendMessage(jid, {
-        text: "pong 🗿"
-      })
-    }
-  })
+  return sock;
 }
 
-startBot().catch(console.error)
+// Start the bot and catch any startup errors
+startBot().catch(err => console.error('❌ Fatal error:', err));
