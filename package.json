@@ -1,12 +1,15 @@
 {
-  "name": "simple-nodejs-app",
+  "name": "wa-pairing-render",
   "version": "1.0.0",
-  "description": "A simple Node.js app for testing",
+  "description": "WhatsApp Pairing Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "keywords": ["nodejs", "test"],
-  "author": "",
-  "license": "ISC"
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "npm:@exclipz/bails",
+    "express": "^5.1.0",
+    "pino": "^9.7.0"
+  }
 }
